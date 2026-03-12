@@ -4,72 +4,52 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
-import { initializeDatabase } from './db-init.js';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 
-let supabase: any = null;
-
-if (supabaseUrl && supabaseAnonKey) {
-  try {
-    supabase = createClient(supabaseUrl, supabaseAnonKey);
-  } catch (e) {
-    console.error("Error initializing Supabase client:", e);
-  }
-} else {
-  console.warn("SUPABASE_URL or SUPABASE_ANON_KEY not set. API will return configuration errors.");
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env");
 }
 
-async function startServer() {
-  // Initialize database tables
-  await initializeDatabase();
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+async function startServer() {
   const app = express();
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-  // Middleware to check Supabase configuration
-  const checkConfig = (req: any, res: any, next: any) => {
-    if (!supabase) {
-      return res.status(500).json({ 
-        error: "Supabase no está configurado. Por favor, configure SUPABASE_URL y SUPABASE_ANON_KEY en los secretos de AI Studio." 
-      });
-    }
-    next();
-  };
 
   const PORT = 3000;
 
   // API Routes
   
   // Master: Warehouses
-  app.get("/api/warehouses", checkConfig, async (req, res) => {
+  app.get("/api/warehouses", async (req, res) => {
     const { data, error } = await supabase.from('warehouses').select('*');
     if (error) return res.status(400).json({ error: error.message });
-    res.json(data || []);
+    res.json(data);
   });
 
-  app.post("/api/warehouses", checkConfig, async (req, res) => {
+  app.post("/api/warehouses", async (req, res) => {
     const { name } = req.body;
     const { data, error } = await supabase.from('warehouses').insert([{ name }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put("/api/warehouses/:id", checkConfig, async (req, res) => {
+  app.put("/api/warehouses/:id", async (req, res) => {
     const { name } = req.body;
     const { error } = await supabase.from('warehouses').update({ name }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete("/api/warehouses/:id", checkConfig, async (req, res) => {
+  app.delete("/api/warehouses/:id", async (req, res) => {
     try {
       // Check if warehouse has stock or movements
       const { data: stockData, error: stockError } = await supabase
@@ -93,7 +73,7 @@ async function startServer() {
   });
 
   // Master: Products
-  app.get("/api/products", checkConfig, async (req, res) => {
+  app.get("/api/products", async (req, res) => {
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -114,7 +94,7 @@ async function startServer() {
     res.json(flattened);
   });
 
-  app.post("/api/products", checkConfig, async (req, res) => {
+  app.post("/api/products", async (req, res) => {
     const { id, name, description, unit_price, category_id, subcategory_id, image_url, is_active } = req.body;
     try {
       const { data: existing } = await supabase.from('products').select('id').eq('id', id).single();
@@ -136,7 +116,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/products/:id", checkConfig, async (req, res) => {
+  app.delete("/api/products/:id", async (req, res) => {
     const { id } = req.params;
     try {
       const { count, error: countError } = await supabase
@@ -161,33 +141,33 @@ async function startServer() {
   });
 
   // Master: Categories & Subcategories
-  app.get("/api/categories", checkConfig, async (req, res) => {
+  app.get("/api/categories", async (req, res) => {
     const { data, error } = await supabase.from('categories').select('*');
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   });
 
-  app.post("/api/categories", checkConfig, async (req, res) => {
+  app.post("/api/categories", async (req, res) => {
     const { name, is_active } = req.body;
     const { data, error } = await supabase.from('categories').insert([{ name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put("/api/categories/:id", checkConfig, async (req, res) => {
+  app.put("/api/categories/:id", async (req, res) => {
     const { name, is_active } = req.body;
     const { error } = await supabase.from('categories').update({ name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete("/api/categories/:id", checkConfig, async (req, res) => {
+  app.delete("/api/categories/:id", async (req, res) => {
     const { error } = await supabase.from('categories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.get("/api/subcategories", checkConfig, async (req, res) => {
+  app.get("/api/subcategories", async (req, res) => {
     const { category_id } = req.query;
     let query = supabase.from('subcategories').select('*');
     if (category_id) {
@@ -198,28 +178,28 @@ async function startServer() {
     res.json(data);
   });
 
-  app.post("/api/subcategories", checkConfig, async (req, res) => {
+  app.post("/api/subcategories", async (req, res) => {
     const { category_id, name, is_active } = req.body;
     const { data, error } = await supabase.from('subcategories').insert([{ category_id, name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put("/api/subcategories/:id", checkConfig, async (req, res) => {
+  app.put("/api/subcategories/:id", async (req, res) => {
     const { category_id, name, is_active } = req.body;
     const { error } = await supabase.from('subcategories').update({ category_id, name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete("/api/subcategories/:id", checkConfig, async (req, res) => {
+  app.delete("/api/subcategories/:id", async (req, res) => {
     const { error } = await supabase.from('subcategories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
   // Master: Socios de Negocios (Entities)
-  app.get("/api/entities", checkConfig, async (req, res) => {
+  app.get("/api/entities", async (req, res) => {
     const { type } = req.query;
     let query = supabase.from('entities').select('*');
     if (type) {
@@ -230,7 +210,7 @@ async function startServer() {
     res.json(data);
   });
 
-  app.post("/api/entities", checkConfig, async (req, res) => {
+  app.post("/api/entities", async (req, res) => {
     const { 
       rut, name, type, address, phone, email,
       comuna, ciudad, is_partner, default_discount,
@@ -260,7 +240,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/entities/:rut/transactions", checkConfig, async (req, res) => {
+  app.get("/api/entities/:rut/transactions", async (req, res) => {
     const { rut } = req.params;
     try {
       const { data: docs, error: docError } = await supabase
@@ -286,7 +266,7 @@ async function startServer() {
   });
 
   // Documents
-  app.get("/api/documents", checkConfig, async (req, res) => {
+  app.get("/api/documents", async (req, res) => {
     const { category, q, type } = req.query;
     try {
       let query = supabase.from('documents').select(`
@@ -314,14 +294,14 @@ async function startServer() {
     }
   });
 
-  app.get("/api/documents/next-number", checkConfig, async (req, res) => {
+  app.get("/api/documents/next-number", async (req, res) => {
     const { data, error } = await supabase.from('documents').select('id').order('id', { ascending: false }).limit(1);
     if (error) return res.status(400).json({ error: error.message });
     const next = (data && data.length > 0 ? data[0].id : 0) + 1;
     res.json({ next: next.toString().padStart(6, '0') });
   });
 
-  app.get("/api/documents/:id", checkConfig, async (req, res) => {
+  app.get("/api/documents/:id", async (req, res) => {
     try {
       const { data: doc, error: docError } = await supabase
         .from('documents')
@@ -385,7 +365,7 @@ async function startServer() {
     }
   };
 
-  app.put("/api/documents/:id", checkConfig, async (req, res) => {
+  app.put("/api/documents/:id", async (req, res) => {
     const { id } = req.params;
     const { 
       doc_number, doc_type, category, date, entity_rut, 
@@ -466,14 +446,14 @@ async function startServer() {
     }
   });
 
-  app.patch("/api/documents/:id/status", checkConfig, async (req, res) => {
+  app.patch("/api/documents/:id/status", async (req, res) => {
     const { status } = req.body;
     const { error } = await supabase.from('documents').update({ status }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.post("/api/documents", checkConfig, async (req, res) => {
+  app.post("/api/documents", async (req, res) => {
     const { 
       doc_number, doc_type, category, date, entity_rut, 
       global_discount, payment_method, lines,
@@ -529,7 +509,7 @@ async function startServer() {
   });
 
   // Payments
-  app.post("/api/payments", checkConfig, async (req, res) => {
+  app.post("/api/payments", async (req, res) => {
     const { document_id, date, amount, method } = req.body;
     try {
       const { error: payError } = await supabase.from('payments').insert([{ document_id, date, amount, method }]);
@@ -555,7 +535,7 @@ async function startServer() {
   });
 
   // Reports
-  app.get("/api/reports/stock", checkConfig, async (req, res) => {
+  app.get("/api/reports/stock", async (req, res) => {
     try {
       // This is a complex query that might be better as a Supabase View or RPC
       // For now, we'll fetch products and calculate manually or use a simplified approach
@@ -610,7 +590,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/reports/stock-breakdown/:productId", checkConfig, async (req, res) => {
+  app.get("/api/reports/stock-breakdown/:productId", async (req, res) => {
     const { productId } = req.params;
     try {
       const { data: warehouses, error: whError } = await supabase.from('warehouses').select('*');
@@ -657,7 +637,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/reports/kardex/:productId", checkConfig, async (req, res) => {
+  app.get("/api/reports/kardex/:productId", async (req, res) => {
     try {
       const { data: rows, error } = await supabase
         .from('document_lines')
@@ -743,7 +723,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/reports/accounts", checkConfig, async (req, res) => {
+  app.get("/api/reports/accounts", async (req, res) => {
     try {
       const { data, error } = await supabase
         .from('documents')

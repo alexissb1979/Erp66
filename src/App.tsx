@@ -227,7 +227,6 @@ const Select = ({ label, value, onChange, options, className = "" }: any) => (
 
 export default function App() {
   const [currentView, setCurrentView] = useState<View>('dashboard');
-  const [configError, setConfigError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -291,7 +290,6 @@ export default function App() {
 
   const fetchData = async () => {
     setLoading(true);
-    setConfigError(null);
     try {
       const [pRes, eRes, wRes, cRes, sRes] = await Promise.all([
         fetch('/api/products'),
@@ -300,42 +298,18 @@ export default function App() {
         fetch('/api/categories'),
         fetch('/api/subcategories')
       ]);
-      
-      const pData = await pRes.json();
-      const eData = await eRes.json();
-      const wData = await wRes.json();
-      const cData = await cRes.json();
-      const sData = await sRes.json();
-
-      if (pRes.status === 500 && pData.error?.includes('configur')) {
-        setConfigError(pData.error);
-      }
-
-      if (Array.isArray(pData)) setProducts(pData);
-      else if (pData && pData.error) console.error("API Error (Products):", pData.error);
-      
-      if (Array.isArray(eData)) setEntities(eData);
-      else if (eData && eData.error) console.error("API Error (Entities):", eData.error);
-      
-      if (Array.isArray(wData)) setWarehouses(wData);
-      else if (wData && wData.error) console.error("API Error (Warehouses):", wData.error);
-      
-      if (Array.isArray(cData)) setCategories(cData);
-      else if (cData && cData.error) console.error("API Error (Categories):", cData.error);
-      
-      if (Array.isArray(sData)) setSubcategories(sData);
-      else if (sData && sData.error) console.error("API Error (Subcategories):", sData.error);
+      setProducts(await pRes.json());
+      setEntities(await eRes.json());
+      setWarehouses(await wRes.json());
+      setCategories(await cRes.json());
+      setSubcategories(await sRes.json());
 
       if (currentView === 'purchases') {
         const dRes = await fetch(`/api/documents?category=purchase&q=${searchTerm}`);
-        const dData = await dRes.json();
-        if (Array.isArray(dData)) setDocuments(dData);
-        else if (dData && dData.error) console.error("API Error (Documents):", dData.error);
+        setDocuments(await dRes.json());
       } else if (currentView === 'sales') {
         const dRes = await fetch(`/api/documents?category=sale&q=${searchTerm}`);
-        const dData = await dRes.json();
-        if (Array.isArray(dData)) setDocuments(dData);
-        else if (dData && dData.error) console.error("API Error (Documents):", dData.error);
+        setDocuments(await dRes.json());
       }
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -614,29 +588,21 @@ export default function App() {
   };
 
   const fetchKardex = async (productId: string) => {
-    const product = (Array.isArray(products) ? products : []).find(p => p.id === productId);
+    const product = products.find(p => p.id === productId);
     const res = await fetch(`/api/reports/kardex/${productId}`);
     const data = await res.json();
-    if (Array.isArray(data)) {
-      setKardexData(data);
-      setKardexProduct(productId);
-      setKardexProductName(product?.name || '');
-      setShowModal('kardex');
-    } else {
-      console.error("Kardex data error:", data);
-    }
+    setKardexData(data);
+    setKardexProduct(productId);
+    setKardexProductName(product?.name || '');
+    setShowModal('kardex');
   };
 
   const fetchStockBreakdown = async (product: any) => {
     setSelectedStockProduct(product);
     const res = await fetch(`/api/reports/stock-breakdown/${product.product_id}`);
     const data = await res.json();
-    if (Array.isArray(data)) {
-      setStockBreakdown(data);
-      setShowModal('stock_breakdown');
-    } else {
-      console.error("Stock breakdown error:", data);
-    }
+    setStockBreakdown(data);
+    setShowModal('stock_breakdown');
   };
 
   const fetchDocDetails = async (docId: number) => {
@@ -769,7 +735,7 @@ export default function App() {
       <Card className="col-span-full lg:col-span-2 p-6">
         <h3 className="text-lg font-bold text-slate-900 mb-4">Stock Crítico</h3>
         <div className="space-y-4">
-          {(Array.isArray(products) ? products : []).slice(0, 4).map((p, i) => (
+          {products.slice(0, 4).map((p, i) => (
             <div key={i} className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
               <div className="flex items-center space-x-3">
                 <div className="p-2 bg-amber-50 rounded-lg text-amber-600">
@@ -792,7 +758,7 @@ export default function App() {
   );
 
   const renderMasterTable = (type: 'products' | 'entities') => {
-    const data = type === 'products' ? (Array.isArray(products) ? products : []) : (Array.isArray(entities) ? entities : []);
+    const data = type === 'products' ? products : entities;
     const title = type === 'products' ? 'Maestro de Productos' : 'Socios de Negocios';
     
     return (
@@ -804,7 +770,7 @@ export default function App() {
             <Button icon={FileText} variant="secondary" onClick={type === 'products' ? handleExportExcel : handleExportEntitiesExcel}>Exportar Excel</Button>
             <Button icon={Plus} onClick={() => {
               if (type === 'products') {
-                const maxId = (Array.isArray(products) ? products : []).reduce((max, p) => {
+                const maxId = products.reduce((max, p) => {
                   const idNum = parseInt(p.id);
                   return isNaN(idNum) ? max : Math.max(max, idNum);
                 }, 0);
@@ -921,9 +887,7 @@ export default function App() {
                         <button 
                           onClick={async () => {
                             const res = await fetch(`/api/entities/${item.rut}/transactions`);
-                            const data = await res.json();
-                            if (Array.isArray(data)) setPartnerTransactions(data);
-                            else console.error("Partner transactions error:", data);
+                            setPartnerTransactions(await res.json());
                             setSelectedPartner(item);
                             setShowModal('partner_transactions');
                           }}
@@ -1082,12 +1046,7 @@ export default function App() {
     const [showZeroStock, setShowZeroStock] = useState(false);
     
     useEffect(() => {
-      fetch('/api/reports/stock')
-        .then(r => r.json())
-        .then(data => {
-          if (Array.isArray(data)) setStockData(data);
-          else console.error("Stock data error:", data);
-        });
+      fetch('/api/reports/stock').then(r => r.json()).then(setStockData);
     }, []);
 
     const exportToExcel = () => {
@@ -1183,12 +1142,7 @@ export default function App() {
     const [type, setType] = useState<'client' | 'supplier'>('client');
 
     useEffect(() => {
-      fetch(`/api/reports/accounts?type=${type}`)
-        .then(r => r.json())
-        .then(data => {
-          if (Array.isArray(data)) setAccounts(data);
-          else console.error("Accounts data error:", data);
-        });
+      fetch(`/api/reports/accounts?type=${type}`).then(r => r.json()).then(setAccounts);
     }, [type]);
 
     return (
@@ -1335,15 +1289,6 @@ export default function App() {
         </header>
 
         <div className="p-8 overflow-y-auto">
-          {configError && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3 text-red-800 animate-in fade-in slide-in-from-top-4 duration-300">
-              <AlertCircle className="shrink-0 mt-0.5" size={20} />
-              <div>
-                <p className="font-bold">Error de Configuración</p>
-                <p className="text-sm opacity-90">{configError}</p>
-              </div>
-            </div>
-          )}
           <AnimatePresence mode="wait">
             <motion.div
               key={currentView}
@@ -1838,7 +1783,7 @@ export default function App() {
                       variant="secondary" 
                       onClick={() => {
                         let balance = 0;
-                        const data = (Array.isArray(kardexData) ? kardexData : []).map(k => {
+                        const data = kardexData.map(k => {
                           balance += k.movement;
                           const [y, m, d] = k.date.split('-');
                           return {
@@ -1969,7 +1914,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {(Array.isArray(stockBreakdown) ? stockBreakdown : []).map((b, i) => (
+                        {stockBreakdown.map((b, i) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{b.warehouse_name}</td>
                             <td className="px-6 py-4 text-sm text-right text-emerald-600">{b.incomes}</td>
@@ -1982,7 +1927,7 @@ export default function App() {
                         <tr className="bg-slate-50 font-bold">
                           <td className="px-6 py-4 text-sm text-slate-900">TOTAL GLOBAL</td>
                           <td className="px-6 py-4 text-sm text-right text-emerald-600">
-                            {(Array.isArray(stockBreakdown) ? stockBreakdown : []).reduce((acc, curr) => acc + curr.incomes, 0)}
+                            {stockBreakdown.reduce((acc, curr) => acc + curr.incomes, 0)}
                           </td>
                           <td className="px-6 py-4 text-sm text-right text-rose-500">
                             {stockBreakdown.reduce((acc, curr) => acc + curr.expenses, 0)}
@@ -2309,7 +2254,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {(Array.isArray(products) ? products : [])
+                        {products
                           .filter(p => 
                             p.id.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             p.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -2376,7 +2321,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {(Array.isArray(partnerTransactions) ? partnerTransactions : []).map((doc) => {
+                        {partnerTransactions.map((doc) => {
                           const isPaid = (doc as any).paid_amount >= doc.total_amount;
                           const daysSince = Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24));
                           
@@ -2400,7 +2345,7 @@ export default function App() {
                             </tr>
                           );
                         })}
-                        {(Array.isArray(partnerTransactions) ? partnerTransactions : []).length === 0 && (
+                        {partnerTransactions.length === 0 && (
                           <tr>
                             <td colSpan={5} className="px-4 py-8 text-center text-slate-400 italic">No hay transacciones registradas</td>
                           </tr>
