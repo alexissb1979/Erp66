@@ -263,6 +263,7 @@ export default function App() {
   const [editingWarehouse, setEditingWarehouse] = useState<any>(null);
   const [isMastersOpen, setIsMastersOpen] = useState(true);
   const [isTablesOpen, setIsTablesOpen] = useState(false);
+  const [dbStatus, setDbStatus] = useState<{ status: 'loading' | 'ok' | 'error', message?: string }>({ status: 'loading' });
 
   // Form states
   const [newEntity, setNewEntity] = useState<Entity>({ 
@@ -285,8 +286,23 @@ export default function App() {
   });
 
   useEffect(() => {
+    checkHealth();
     fetchData();
   }, [currentView]);
+
+  const checkHealth = async () => {
+    try {
+      const res = await fetch('/api/health');
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setDbStatus({ status: 'ok' });
+      } else {
+        setDbStatus({ status: 'error', message: data.message || 'Error de conexión con la base de datos' });
+      }
+    } catch (err) {
+      setDbStatus({ status: 'error', message: 'No se pudo contactar con el servidor' });
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -298,6 +314,11 @@ export default function App() {
         fetch('/api/categories'),
         fetch('/api/subcategories')
       ]);
+
+      if (!pRes.ok || !eRes.ok || !wRes.ok || !cRes.ok || !sRes.ok) {
+        throw new Error('Error al cargar datos maestros');
+      }
+
       setProducts(await pRes.json());
       setEntities(await eRes.json());
       setWarehouses(await wRes.json());
@@ -306,13 +327,14 @@ export default function App() {
 
       if (currentView === 'purchases') {
         const dRes = await fetch(`/api/documents?category=purchase&q=${searchTerm}`);
-        setDocuments(await dRes.json());
+        if (dRes.ok) setDocuments(await dRes.json());
       } else if (currentView === 'sales') {
         const dRes = await fetch(`/api/documents?category=sale&q=${searchTerm}`);
-        setDocuments(await dRes.json());
+        if (dRes.ok) setDocuments(await dRes.json());
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching data:", error);
+      setDbStatus({ status: 'error', message: error.message || 'Error al cargar datos' });
     }
     setLoading(false);
   };
@@ -1262,6 +1284,26 @@ export default function App() {
             <SidebarItem icon={Wallet} label="Cuentas Corrientes" active={currentView === 'accounts'} onClick={() => setCurrentView('accounts')} />
           </div>
         </nav>
+
+        {/* Database Status Indicator */}
+        <div className="p-4 border-t border-slate-800">
+          <div className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs font-medium ${
+            dbStatus.status === 'ok' ? 'bg-emerald-500/10 text-emerald-400' : 
+            dbStatus.status === 'loading' ? 'bg-slate-800 text-slate-400' : 
+            'bg-rose-500/10 text-rose-400'
+          }`}>
+            <div className={`w-2 h-2 rounded-full ${
+              dbStatus.status === 'ok' ? 'bg-emerald-500 animate-pulse' : 
+              dbStatus.status === 'loading' ? 'bg-slate-500 animate-pulse' : 
+              'bg-rose-500'
+            }`} />
+            <span className={`truncate ${!isSidebarOpen && 'hidden'}`}>
+              {dbStatus.status === 'ok' ? 'Base de datos conectada' : 
+               dbStatus.status === 'loading' ? 'Conectando...' : 
+               dbStatus.message || 'Error de conexión'}
+            </span>
+          </div>
+        </div>
       </aside>
 
       {/* Main Content */}

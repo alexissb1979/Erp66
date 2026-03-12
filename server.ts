@@ -26,6 +26,23 @@ async function startServer() {
 
   const PORT = 3000;
 
+  // Health check
+  app.get("/api/health", async (req, res) => {
+    try {
+      if (!supabaseUrl || !supabaseAnonKey) {
+        return res.status(500).json({ 
+          status: "error", 
+          message: "Supabase environment variables are missing. Please set SUPABASE_URL and SUPABASE_ANON_KEY in the Secrets panel." 
+        });
+      }
+      const { error } = await supabase.from('warehouses').select('id').limit(1);
+      if (error) throw error;
+      res.json({ status: "ok", database: "connected" });
+    } catch (e: any) {
+      res.status(500).json({ status: "error", message: e.message });
+    }
+  });
+
   // API Routes
   
   // Master: Warehouses
@@ -97,7 +114,9 @@ async function startServer() {
   app.post("/api/products", async (req, res) => {
     const { id, name, description, unit_price, category_id, subcategory_id, image_url, is_active } = req.body;
     try {
-      const { data: existing } = await supabase.from('products').select('id').eq('id', id).single();
+      const { data: existing, error: fetchError } = await supabase.from('products').select('id').eq('id', id).single();
+      
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
       
       if (existing) {
         const { error } = await supabase.from('products').update({
@@ -217,8 +236,10 @@ async function startServer() {
       person_type, contact_name, contact_phone, contact_email
     } = req.body;
     try {
-      const { data: existing } = await supabase.from('entities').select('rut').eq('rut', rut).single();
+      const { data: existing, error: fetchError } = await supabase.from('entities').select('rut').eq('rut', rut).single();
       
+      if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
+
       if (existing) {
         const { error } = await supabase.from('entities').update({
           name, type, address, phone, email,
