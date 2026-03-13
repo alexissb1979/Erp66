@@ -173,7 +173,7 @@ const Card = ({ children, className = "", ...props }: { children: React.ReactNod
   </div>
 );
 
-const Button = ({ children, onClick, variant = 'primary', icon: Icon, disabled = false, className = "" }: any) => {
+const Button = ({ children, onClick, variant = 'primary', icon: Icon, disabled = false, className = "", type = "button" }: any) => {
   const variants = {
     primary: 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-100',
     secondary: 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50',
@@ -183,6 +183,7 @@ const Button = ({ children, onClick, variant = 'primary', icon: Icon, disabled =
 
   return (
     <button
+      type={type}
       onClick={onClick}
       disabled={disabled}
       className={`flex items-center justify-center space-x-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm ${variants[variant as keyof typeof variants]} ${className}`}
@@ -251,7 +252,7 @@ export default function App() {
   const [paymentAmount, setPaymentAmount] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState('transferencia');
   const [searchTerm, setSearchTerm] = useState('');
-  const [rutError, setRutError] = useState<{ show: boolean, msg: string, expectedDv?: string | null }>({ show: false, msg: '', expectedDv: null });
+  const [validationError, setValidationError] = useState<{ show: boolean, msg: string, expectedDv?: string | null }>({ show: false, msg: '', expectedDv: null });
   const [stockBreakdown, setStockBreakdown] = useState<any[]>([]);
   const [selectedStockProduct, setSelectedStockProduct] = useState<any>(null);
   const [kardexProduct, setKardexProduct] = useState<string | null>(null);
@@ -343,7 +344,7 @@ export default function App() {
     if (!newEntity.rut) return;
     const rutValidation = validateRut(newEntity.rut);
     if (!rutValidation.isValid) {
-      setRutError({
+      setValidationError({
         show: true,
         msg: "El RUT ingresado no es válido.",
         expectedDv: rutValidation.expectedDv || null
@@ -355,7 +356,7 @@ export default function App() {
     if (!newDoc.entity_rut) return;
     const rutValidation = validateRut(newDoc.entity_rut);
     if (!rutValidation.isValid) {
-      setRutError({
+      setValidationError({
         show: true,
         msg: "El RUT ingresado no es válido.",
         expectedDv: rutValidation.expectedDv || null
@@ -369,7 +370,7 @@ export default function App() {
     // Validate RUT format and DV
     const rutValidation = validateRut(newEntity.rut);
     if (!rutValidation.isValid) {
-      setRutError({
+      setValidationError({
         show: true,
         msg: "El RUT ingresado no es válido.",
         expectedDv: rutValidation.expectedDv || null
@@ -377,17 +378,30 @@ export default function App() {
       return;
     }
 
-    // Validate RUT uniqueness for new entities
-    if (!isEditingEntity && entities.some(ent => ent.rut === newEntity.rut)) {
-      alert("Error: Ya existe un socio de negocio con este RUT.");
+    // New validations requested by user
+    if (!newEntity.name.trim()) {
+      setValidationError({ show: true, msg: 'Falta agregar el nombre del socio.' });
       return;
     }
+    if (!newEntity.address.trim()) {
+      setValidationError({ show: true, msg: 'Falta agregar el campo de dirección.' });
+      return;
+    }
+
+    // Validate RUT uniqueness for new entities
+    if (!isEditingEntity && entities.some(ent => ent.rut === newEntity.rut)) {
+      setValidationError({ show: true, msg: "Error: Ya existe un socio de negocio con este RUT." });
+      return;
+    }
+    
+    const cleanRut = newEntity.rut.replace(/\./g, '').replace(/-/g, '').toUpperCase();
     
     const res = await fetch('/api/entities', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...newEntity,
+        rut: cleanRut,
         default_discount: (typeof newEntity.default_discount === 'number' && !isNaN(newEntity.default_discount)) ? newEntity.default_discount : 0
       })
     });
@@ -406,7 +420,7 @@ export default function App() {
       });
     } else {
       const err = await res.json();
-      alert(`Error: ${err.error || 'No se pudo guardar el socio'}`);
+      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo guardar el socio'}` });
     }
   };
 
@@ -472,6 +486,19 @@ export default function App() {
 
   const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newProduct.name) {
+      setValidationError({ show: true, msg: 'Falta agregar el nombre del producto.' });
+      return;
+    }
+    if (!newProduct.id) {
+      setValidationError({ show: true, msg: 'Falta agregar el SKU/ID del producto.' });
+      return;
+    }
+    if (newProduct.unit_price <= 0) {
+      setValidationError({ show: true, msg: 'El precio unitario debe ser mayor a 0.' });
+      return;
+    }
+
     const res = await fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -489,6 +516,9 @@ export default function App() {
       }
       fetchData();
       setNewProduct({ id: '', name: '', description: '', unit_price: 0, category_id: undefined, subcategory_id: undefined, image_url: '', is_active: 1 });
+    } else {
+      const err = await res.json();
+      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo guardar el producto'}` });
     }
   };
 
@@ -496,7 +526,7 @@ export default function App() {
     if (!confirm('¿Está seguro de eliminar este producto?')) return;
     const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
     const data = await res.json();
-    if (data.message) alert(data.message);
+    if (data.message) setValidationError({ show: true, msg: data.message });
     fetchData();
   };
 
@@ -513,7 +543,7 @@ export default function App() {
 
   const handleSaveCategory = async () => {
     if (!newCatName.trim()) {
-      alert('El nombre es obligatorio');
+      setValidationError({ show: true, msg: 'El nombre es obligatorio' });
       return;
     }
 
@@ -524,7 +554,7 @@ export default function App() {
     
     if (manageCatType === 'subcategory') {
       if (!selectedCatId) {
-        alert('Debe seleccionar una categoría padre');
+        setValidationError({ show: true, msg: 'Debe seleccionar una categoría padre' });
         return;
       }
       body.category_id = Number(selectedCatId);
@@ -549,11 +579,11 @@ export default function App() {
         fetchData();
       } else {
         const error = await res.json();
-        alert(`Error: ${error.error || 'No se pudo guardar'}`);
+        setValidationError({ show: true, msg: `Error: ${error.error || 'No se pudo guardar'}` });
       }
     } catch (err) {
       console.error(err);
-      alert('Error de conexión al guardar');
+      setValidationError({ show: true, msg: 'Error de conexión al guardar' });
     }
   };
 
@@ -637,7 +667,7 @@ export default function App() {
   const handleSavePayment = async () => {
     if (!selectedDoc) return;
     if (isNaN(paymentAmount) || paymentAmount <= 0) {
-      alert("Por favor ingrese un monto válido.");
+      setValidationError({ show: true, msg: "Por favor ingrese un monto válido." });
       return;
     }
     const res = await fetch('/api/payments', {
@@ -653,28 +683,49 @@ export default function App() {
     if (res.ok) {
       setShowModal(null);
       fetchData();
+    } else {
+      const err = await res.json();
+      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo registrar el pago'}` });
     }
   };
 
   const handleSaveDoc = async () => {
     // Validate RUT
     if (!newDoc.entity_rut) {
-      alert("Error: Debe ingresar el RUT del socio.");
+      setValidationError({ show: true, msg: "Error: Debe ingresar el RUT del socio." });
       return;
     }
     const rutValidation = validateRut(newDoc.entity_rut);
     if (!rutValidation.isValid) {
-      if (rutValidation.expectedDv) {
-        alert(`Error: El RUT ingresado no es válido. El dígito verificador correcto para los números ingresados es "${rutValidation.expectedDv}".`);
-      } else {
-        alert("Error: El RUT ingresado no es válido.");
-      }
+      setValidationError({
+        show: true,
+        msg: rutValidation.expectedDv 
+          ? `Error: El RUT ingresado no es válido. El dígito verificador correcto para los números ingresados es "${rutValidation.expectedDv}".`
+          : "Error: El RUT ingresado no es válido.",
+        expectedDv: rutValidation.expectedDv || null
+      });
+      return;
+    }
+
+    if (!newDoc.entity_rut) {
+      setValidationError({ show: true, msg: 'Debe seleccionar un socio de negocios.' });
+      return;
+    }
+    if (!newDoc.lines?.length) {
+      setValidationError({ show: true, msg: 'El documento debe tener al menos una línea.' });
+      return;
+    }
+    if (!newDoc.doc_number) {
+      setValidationError({ show: true, msg: 'Falta agregar el número de documento.' });
       return;
     }
 
     const totals = calculateDocTotals();
+    const cleanRut = newDoc.entity_rut.replace(/\./g, '').replace(/-/g, '').toUpperCase();
+    
     const docToSave = {
       ...newDoc,
+      entity_rut: cleanRut,
       total_net: totals.discounted,
       total_vat: totals.vat,
       total_amount: totals.total
@@ -706,7 +757,7 @@ export default function App() {
       });
     } else {
       const err = await res.json();
-      alert(`Error: ${err.error || 'No se pudo guardar el documento'}`);
+      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo guardar el documento'}` });
     }
   };
 
@@ -937,6 +988,117 @@ export default function App() {
     );
   };
 
+  const renderCategories = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-slate-900">Maestro de Categorías</h2>
+        <div className="flex space-x-3">
+          <Button icon={Plus} variant="secondary" onClick={() => {
+            setManageCatType('subcategory');
+            setEditingCat(null);
+            setNewCatName('');
+            setCatActiveStatus(1);
+            setShowModal('manage_categories');
+          }}>Nueva Subcategoría</Button>
+          <Button icon={Plus} onClick={() => {
+            setManageCatType('category');
+            setEditingCat(null);
+            setNewCatName('');
+            setCatActiveStatus(1);
+            setShowModal('manage_categories');
+          }}>Nueva Categoría</Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <Card>
+          <div className="p-4 border-b border-slate-200 bg-slate-50">
+            <h3 className="font-bold text-slate-700">Categorías</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Nombre</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Estado</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {categories.map(cat => (
+                  <tr key={cat.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900">{cat.name}</td>
+                    <td className="px-6 py-4 text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${cat.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {cat.is_active ? 'ACTIVO' : 'INACTIVO'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right">
+                      <button 
+                        onClick={() => {
+                          setManageCatType('category');
+                          setEditingCat(cat);
+                          setNewCatName(cat.name);
+                          setCatActiveStatus(cat.is_active ? 1 : 0);
+                          setShowModal('manage_categories');
+                        }}
+                        className="text-indigo-600 hover:text-indigo-800 font-medium"
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+
+        <Card>
+          <div className="p-4 border-b border-slate-200 bg-slate-50">
+            <h3 className="font-bold text-slate-700">Subcategorías</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Nombre</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Categoría Padre</th>
+                  <th className="px-6 py-3 text-xs font-semibold text-slate-500 uppercase text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {subcategories.map(sub => (
+                  <tr key={sub.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-medium text-slate-900">{sub.name}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">
+                      {categories.find(c => c.id === sub.category_id)?.name || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right">
+                      <button 
+                        onClick={() => {
+                          setManageCatType('subcategory');
+                          setEditingCat(sub);
+                          setNewCatName(sub.name);
+                          setSelectedCatId(sub.category_id);
+                          setCatActiveStatus(sub.is_active ? 1 : 0);
+                          setShowModal('manage_categories');
+                        }}
+                        className="text-indigo-600 hover:text-indigo-800 font-medium"
+                      >
+                        Editar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+
   const renderWarehouses = () => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -983,7 +1145,7 @@ export default function App() {
                             fetchData();
                           } else {
                             const err = await res.json();
-                            alert(err.error || 'No se pudo eliminar la bodega');
+                            setValidationError({ show: true, msg: err.error || 'No se pudo eliminar la bodega' });
                           }
                         }}
                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
@@ -1265,6 +1427,7 @@ export default function App() {
                 {isTablesOpen && isSidebarOpen && (
                   <div className="pl-8 space-y-1">
                     <SidebarItem icon={Warehouse} label="Bodegas" active={currentView === 'warehouses'} onClick={() => setCurrentView('warehouses')} />
+                    <SidebarItem icon={LayoutGrid} label="Categorías" active={currentView === 'categories_view'} onClick={() => setCurrentView('categories_view')} />
                   </div>
                 )}
               </div>
@@ -1343,6 +1506,7 @@ export default function App() {
               {currentView === 'products' && renderMasterTable('products')}
               {currentView === 'entities' && renderMasterTable('entities')}
               {currentView === 'warehouses' && renderWarehouses()}
+              {currentView === 'categories_view' && renderCategories()}
               {currentView === 'purchases' && renderDocumentView('purchase')}
               {currentView === 'sales' && renderDocumentView('sale')}
               {currentView === 'stock' && <StockReport fetchKardex={fetchKardex} fetchStockBreakdown={fetchStockBreakdown} handlePrint={handlePrint} />}
@@ -1622,7 +1786,10 @@ export default function App() {
                   <div className="flex justify-end space-x-3 pt-4">
                     <Button variant="secondary" onClick={() => setShowModal(null)}>Cancelar</Button>
                     <Button onClick={async () => {
-                      if (!newWarehouseName.trim()) return alert('Nombre obligatorio');
+                      if (!newWarehouseName.trim()) {
+                        setValidationError({ show: true, msg: 'Falta agregar el nombre de la bodega.' });
+                        return;
+                      }
                       const method = editingWarehouse ? 'PUT' : 'POST';
                       const url = editingWarehouse ? `/api/warehouses/${editingWarehouse.id}` : '/api/warehouses';
                       const res = await fetch(url, {
@@ -1635,7 +1802,7 @@ export default function App() {
                         fetchData();
                       } else {
                         const err = await res.json();
-                        alert(err.error || 'Error al guardar');
+                        setValidationError({ show: true, msg: err.error || 'Error al guardar la bodega.' });
                       }
                     }}>Guardar</Button>
                   </div>
@@ -2404,7 +2571,7 @@ export default function App() {
 
       {/* RUT Error Modal */}
       <AnimatePresence>
-        {rutError.show && (
+        {validationError.show && (
           <motion.div 
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -2422,15 +2589,15 @@ export default function App() {
                 <h3 className="text-lg font-bold">Error de Validación</h3>
               </div>
               <p className="text-slate-600 mb-6">
-                {rutError.msg}
-                {rutError.expectedDv && (
+                {validationError.msg}
+                {validationError.expectedDv && (
                   <span className="block mt-2 font-medium text-slate-900">
-                    El dígito verificador correcto sugerido es: <span className="text-indigo-600 font-bold underline">"{rutError.expectedDv}"</span>
+                    El dígito verificador correcto sugerido es: <span className="text-indigo-600 font-bold underline">"{validationError.expectedDv}"</span>
                   </span>
                 )}
               </p>
               <div className="flex justify-end">
-                <Button onClick={() => setRutError({ ...rutError, show: false })}>Entendido</Button>
+                <Button onClick={() => setValidationError({ ...validationError, show: false })}>Entendido</Button>
               </div>
             </motion.div>
           </motion.div>
