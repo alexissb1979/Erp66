@@ -1,0 +1,7 @@
+---
+deployment:
+  tasks:
+    - export PATH=$PATH:/usr/local/bin
+    - npm install
+    - npm run build
+    - touch tmp/restart.txt

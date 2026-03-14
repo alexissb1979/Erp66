@@ -120,6 +120,9 @@ interface Document {
   status?: string;
 }
 
+// --- Constants ---
+const API_BASE = '/erp/api';
+
 // --- Utils ---
 const calculateExpectedDv = (rutBody: string) => {
   let sum = 0;
@@ -327,7 +330,7 @@ export default function App() {
 
   const checkHealth = async () => {
     try {
-      const res = await fetch('/api/health');
+      const res = await fetch(`${API_BASE}/health`);
       const data = await res.json();
       if (res.ok && data.status === 'ok') {
         setDbStatus({ status: 'ok' });
@@ -343,11 +346,11 @@ export default function App() {
     setLoading(true);
     try {
       const [pRes, eRes, wRes, cRes, sRes] = await Promise.all([
-        fetch('/api/products'),
-        fetch('/api/entities'),
-        fetch('/api/warehouses'),
-        fetch('/api/categories'),
-        fetch('/api/subcategories')
+        fetch(`${API_BASE}/products`),
+        fetch(`${API_BASE}/entities`),
+        fetch(`${API_BASE}/warehouses`),
+        fetch(`${API_BASE}/categories`),
+        fetch(`${API_BASE}/subcategories`)
       ]);
 
       if (!pRes.ok || !eRes.ok || !wRes.ok || !cRes.ok || !sRes.ok) {
@@ -361,10 +364,10 @@ export default function App() {
       setSubcategories(await sRes.json());
 
       if (currentView === 'purchases') {
-        const dRes = await fetch(`/api/documents?category=purchase&q=${searchTerm}`);
+        const dRes = await fetch(`${API_BASE}/documents?category=purchase&q=${searchTerm}`);
         if (dRes.ok) setDocuments(await dRes.json());
       } else if (currentView === 'sales') {
-        const dRes = await fetch(`/api/documents?category=sale&q=${searchTerm}`);
+        const dRes = await fetch(`${API_BASE}/documents?category=sale&q=${searchTerm}`);
         if (dRes.ok) setDocuments(await dRes.json());
       }
     } catch (error: any) {
@@ -430,7 +433,7 @@ export default function App() {
     
     const cleanRut = newEntity.rut.replace(/\./g, '').replace(/-/g, '').toUpperCase();
     
-    const res = await fetch('/api/entities', {
+    const res = await fetch(`${API_BASE}/entities`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -533,7 +536,7 @@ export default function App() {
       return;
     }
 
-    const res = await fetch('/api/products', {
+    const res = await fetch(`${API_BASE}/products`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -558,7 +561,7 @@ export default function App() {
 
   const handleDeleteProduct = async (id: string) => {
     if (!confirm('¿Está seguro de eliminar este producto?')) return;
-    const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/products/${id}`, { method: 'DELETE' });
     const data = await res.json();
     if (data.message) setValidationError({ show: true, msg: data.message });
     fetchData();
@@ -594,7 +597,7 @@ export default function App() {
       body.category_id = Number(selectedCatId);
     }
     
-    const endpoint = manageCatType === 'category' ? '/api/categories' : '/api/subcategories';
+    const endpoint = manageCatType === 'category' ? `${API_BASE}/categories` : `${API_BASE}/subcategories`;
     const method = editingCat ? 'PUT' : 'POST';
     const url = editingCat ? `${endpoint}/${editingCat.id}` : endpoint;
     
@@ -622,7 +625,7 @@ export default function App() {
   };
 
   const handleDeleteCategory = async (id: number, type: 'category' | 'subcategory') => {
-    const endpoint = type === 'category' ? `/api/categories/${id}` : `/api/subcategories/${id}`;
+    const endpoint = type === 'category' ? `${API_BASE}/categories/${id}` : `${API_BASE}/subcategories/${id}`;
     const res = await fetch(endpoint, { method: 'DELETE' });
     if (res.ok) fetchData();
   };
@@ -676,7 +679,7 @@ export default function App() {
   const fetchKardex = async (productId: string) => {
     const product = products.find(p => p.id === productId);
     try {
-      const res = await fetch(`/api/reports/kardex/${productId}`);
+      const res = await fetch(`${API_BASE}/reports/kardex/${productId}`);
       const data = await res.json();
       if (res.ok) {
         setKardexData(Array.isArray(data) ? data : []);
@@ -694,7 +697,7 @@ export default function App() {
   const fetchStockBreakdown = async (product: any) => {
     setSelectedStockProduct(product);
     try {
-      const res = await fetch(`/api/reports/stock-breakdown/${product.product_id}`);
+      const res = await fetch(`${API_BASE}/reports/stock-breakdown/${product.product_id}`);
       const data = await res.json();
       if (res.ok) {
         setStockBreakdown(Array.isArray(data) ? data : []);
@@ -708,7 +711,7 @@ export default function App() {
   };
 
   const fetchDocDetails = async (docId: number) => {
-    const res = await fetch(`/api/documents/${docId}`);
+    const res = await fetch(`${API_BASE}/documents/${docId}`);
     const data = await res.json();
     setSelectedDoc(data);
     setShowModal('viewDoc');
@@ -720,7 +723,7 @@ export default function App() {
       setValidationError({ show: true, msg: "Por favor ingrese un monto válido." });
       return;
     }
-    const res = await fetch('/api/payments', {
+    const res = await fetch(`${API_BASE}/payments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -782,7 +785,7 @@ export default function App() {
     };
 
     const method = newDoc.id ? 'PUT' : 'POST';
-    const url = newDoc.id ? `/api/documents/${newDoc.id}` : '/api/documents';
+    const url = newDoc.id ? `${API_BASE}/documents/${newDoc.id}` : `${API_BASE}/documents`;
 
     const res = await fetch(url, {
       method,
@@ -825,7 +828,7 @@ export default function App() {
   };
 
   const handleDeleteDoc = async (id: number) => {
-    const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' });
     if (res.ok) {
       fetchData();
       setShowDeleteConfirm({ show: false, id: null });
@@ -1033,7 +1036,7 @@ export default function App() {
                       {type === 'entities' && (
                         <button 
                           onClick={async () => {
-                            const res = await fetch(`/api/entities/${item.rut}/transactions`);
+                            const res = await fetch(`${API_BASE}/entities/${item.rut}/transactions`);
                             setPartnerTransactions(await res.json());
                             setSelectedPartner(item);
                             setShowModal('partner_transactions');
@@ -1214,7 +1217,7 @@ export default function App() {
                       <button 
                         onClick={async () => {
                           if (!confirm('¿Está seguro de eliminar esta bodega?')) return;
-                          const res = await fetch(`/api/warehouses/${w.id}`, { method: 'DELETE' });
+                          const res = await fetch(`${API_BASE}/warehouses/${w.id}`, { method: 'DELETE' });
                           if (res.ok) {
                             fetchData();
                           } else {
@@ -1248,7 +1251,7 @@ export default function App() {
           <div className="flex space-x-3">
             <Button icon={Search} variant="secondary">Buscar</Button>
             <Button icon={Plus} onClick={async () => {
-              const res = await fetch(`/api/documents/next-number?category=${category}`);
+              const res = await fetch(`${API_BASE}/documents/next-number?category=${category}`);
               const { next } = await res.json();
               setNewDoc(prev => ({ ...prev, category, internal_number: next, doc_number: '' }));
               setShowModal('document');
@@ -1312,7 +1315,7 @@ export default function App() {
     const [showZeroStock, setShowZeroStock] = useState(false);
     
     useEffect(() => {
-      fetch('/api/reports/stock').then(r => r.json()).then(setStockData);
+      fetch(`${API_BASE}/reports/stock`).then(r => r.json()).then(setStockData);
     }, []);
 
     const exportToExcel = () => {
@@ -1408,7 +1411,7 @@ export default function App() {
     const [type, setType] = useState<'client' | 'supplier'>('client');
 
     useEffect(() => {
-      fetch(`/api/reports/accounts?type=${type}`).then(r => r.json()).then(setAccounts);
+      fetch(`${API_BASE}/reports/accounts?type=${type}`).then(r => r.json()).then(setAccounts);
     }, [type]);
 
     return (
@@ -1941,7 +1944,7 @@ export default function App() {
                         return;
                       }
                       const method = editingWarehouse ? 'PUT' : 'POST';
-                      const url = editingWarehouse ? `/api/warehouses/${editingWarehouse.id}` : '/api/warehouses';
+                      const url = editingWarehouse ? `${API_BASE}/warehouses/${editingWarehouse.id}` : `${API_BASE}/warehouses`;
                       const res = await fetch(url, {
                         method,
                         headers: { 'Content-Type': 'application/json' },
