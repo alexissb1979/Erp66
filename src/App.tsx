@@ -235,6 +235,29 @@ const Select = ({ label, value, onChange, options, className = "" }: any) => (
 // --- Main App ---
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    return localStorage.getItem('garage66_auth') === 'true';
+  });
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginError, setLoginError] = useState('');
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginUser === 'Admin' && loginPass === 'Garage*') {
+      setIsAuthenticated(true);
+      localStorage.setItem('garage66_auth', 'true');
+      setLoginError('');
+    } else {
+      setLoginError('Usuario o contraseña incorrectos');
+    }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('garage66_auth');
+  };
+
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1453,7 +1476,64 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <>
+      {!isAuthenticated ? (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full"
+          >
+            <div className="flex flex-col items-center mb-8">
+              <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-xl shadow-indigo-500/20 mb-4">
+                <Layout size={32} className="text-white" />
+              </div>
+              <h1 className="text-2xl font-bold text-slate-900">Garage66 ERP</h1>
+              <p className="text-slate-500">Ingrese sus credenciales</p>
+            </div>
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Usuario</label>
+                <input 
+                  type="text" 
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  placeholder="Admin"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Contraseña</label>
+                <input 
+                  type="password" 
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all"
+                  placeholder="••••••••"
+                  required
+                />
+              </div>
+              
+              {loginError && (
+                <div className="flex items-center space-x-2 text-rose-600 bg-rose-50 p-3 rounded-xl text-sm">
+                  <AlertCircle size={16} />
+                  <span>{loginError}</span>
+                </div>
+              )}
+
+              <button 
+                type="submit"
+                className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg shadow-indigo-500/30 hover:bg-indigo-700 transition-all active:scale-[0.98]"
+              >
+                Iniciar Sesión
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      ) : (
+        <div className="min-h-screen bg-slate-50 flex">
       {/* Sidebar */}
       <aside className={`bg-slate-900 text-white transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-20'} hidden md:flex flex-col h-screen sticky top-0`}>
         <div className="p-6 flex items-center space-x-3 border-b border-slate-800">
@@ -1546,8 +1626,17 @@ export default function App() {
                 className="pl-10 pr-4 py-2 bg-slate-100 border-transparent rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none transition-all w-64 text-sm"
               />
             </div>
-            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold">
-              VH
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-700 font-bold">
+                AD
+              </div>
+              <button 
+                onClick={handleLogout}
+                className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                title="Cerrar Sesión"
+              >
+                <X size={20} />
+              </button>
             </div>
           </div>
         </header>
@@ -2770,5 +2859,7 @@ export default function App() {
         )}
       </AnimatePresence>
     </div>
+      )}
+    </>
   );
 }
