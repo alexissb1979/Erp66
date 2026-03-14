@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { initializeDatabase } from './db-init.js';
 
 dotenv.config();
 
@@ -20,6 +21,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 async function startServer() {
+  await initializeDatabase();
   const app = express();
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -316,9 +318,20 @@ async function startServer() {
   });
 
   app.get("/api/documents/next-number", async (req, res) => {
-    const { data, error } = await supabase.from('documents').select('id').order('id', { ascending: false }).limit(1);
+    const { category } = req.query;
+    const { data, error } = await supabase
+      .from('documents')
+      .select('internal_number')
+      .eq('category', category)
+      .order('id', { ascending: false })
+      .limit(1);
+    
     if (error) return res.status(400).json({ error: error.message });
-    const next = (data && data.length > 0 ? data[0].id : 0) + 1;
+    
+    let next = 1;
+    if (data && data.length > 0 && data[0].internal_number) {
+      next = parseInt(data[0].internal_number) + 1;
+    }
     res.json({ next: next.toString().padStart(6, '0') });
   });
 
@@ -467,21 +480,65 @@ async function startServer() {
     }
   });
 
-  app.patch("/api/documents/:id/status", async (req, res) => {
-    const { status } = req.body;
-    const { error } = await supabase.from('documents').update({ status }).eq('id', req.params.id);
-    if (error) return res.status(400).json({ error: error.message });
-    res.json({ success: true });
+  app.delete("/api/documents/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      // Get document details to revert stock
+      const { data: doc, error: docError } = await supabase
+        .from('documents')
+        .select('*, lines:document_lines(*)')
+        .eq('id', id)
+        .single();
+      
+      if (docError) throw docError;
+
+      // Revert stock
+      for (const line of doc.lines) {
+        const lineWhId = line.warehouse_id || (doc.category === 'purchase' ? doc.to_warehouse_id : doc.from_warehouse_id) || 1;
+        
+        if (doc.category === 'purchase') {
+          const qty = doc.doc_type === 'nota_credito' ? line.quantity : -line.quantity;
+          await updateStock(line.product_id, lineWhId, qty);
+        } else if (doc.category === 'sale') {
+          const qty = doc.doc_type === 'nota_credito' ? -line.quantity : line.quantity;
+          await updateStock(line.product_id, lineWhId, qty);
+        } else if (doc.category === 'transfer') {
+          await updateStock(line.product_id, doc.from_warehouse_id, line.quantity);
+          await updateStock(line.product_id, doc.to_warehouse_id, -line.quantity);
+        }
+      }
+
+      const { error: deleteError } = await supabase.from('documents').delete().eq('id', id);
+      if (deleteError) throw deleteError;
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
   });
 
   app.post("/api/documents", async (req, res) => {
     const { 
-      doc_number, doc_type, category, date, entity_rut, 
+      internal_number, doc_number, doc_type, category, date, entity_rut, 
       global_discount, payment_method, lines,
       from_warehouse_id, to_warehouse_id
     } = req.body;
 
     try {
+      // Check for duplicates
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('id')
+        .eq('entity_rut', entity_rut)
+        .eq('doc_number', doc_number)
+        .eq('category', category)
+        .limit(1);
+      
+      if (existing && existing.length > 0) {
+        throw new Error(`Ya existe un documento con el número ${doc_number} para este socio de negocio.`);
+      }
+
       // Calculate totals
       let total_net = 0;
       for (const line of lines) {
@@ -494,7 +551,7 @@ async function startServer() {
       const status = (payment_method === 'credito') ? 'active' : 'paid';
 
       const { data: docData, error: docError } = await supabase.from('documents').insert([{
-        doc_number, doc_type, category, date, entity_rut, 
+        internal_number, doc_number, doc_type, category, date, entity_rut, 
         global_discount, payment_method, total_net: discounted_net, total_vat, total_amount,
         from_warehouse_id, to_warehouse_id, status
       }]).select();
@@ -503,6 +560,21 @@ async function startServer() {
       const docId = docData[0].id;
 
       for (const line of lines) {
+        // Stock check for sales
+        if (category === 'sale' && doc_type !== 'nota_credito') {
+          const { data: stockData } = await supabase
+            .from('stock')
+            .select('quantity')
+            .eq('product_id', line.product_id)
+            .eq('warehouse_id', line.warehouse_id || from_warehouse_id || 1)
+            .single();
+          
+          const currentStock = stockData?.quantity || 0;
+          if (currentStock < line.quantity && !req.body.supervisorAuthorized) {
+            throw new Error(`Stock insuficiente para el producto ${line.product_id}. Stock actual: ${currentStock}`);
+          }
+        }
+
         const { error: lineError } = await supabase.from('document_lines').insert([{
           document_id: docId, product_id: line.product_id, warehouse_id: line.warehouse_id, 
           quantity: line.quantity, price: line.price, discount: line.discount, total: line.total
@@ -666,9 +738,11 @@ async function startServer() {
           id,
           quantity,
           price,
-          document:documents(id, date, doc_number, doc_type, category, entity_rut, from_warehouse_id, to_warehouse_id),
-          warehouse:warehouses(name),
-          entity:entities(name)
+          document:documents(
+            *,
+            entity:entities(name)
+          ),
+          warehouse:warehouses(name)
         `)
         .eq('product_id', req.params.productId);
       
@@ -726,12 +800,13 @@ async function startServer() {
         return {
           id: d.id,
           date: d.date,
+          internal_number: d.internal_number,
           doc_number: d.doc_number,
           doc_type: d.doc_type,
           category: d.category,
           quantity: row.quantity,
           price: row.price,
-          entity_name: (row.entity as any)?.name,
+          entity_name: (d.entity as any)?.name,
           warehouse_name: (row.warehouse as any)?.name,
           movement,
           avg_cost: currentAvgCost

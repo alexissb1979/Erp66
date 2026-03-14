@@ -38,7 +38,8 @@ import {
   Phone,
   Mail,
   Percent,
-  BarChart3
+  BarChart3,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -101,6 +102,7 @@ interface DocumentLine {
 
 interface Document {
   id?: number;
+  internal_number?: string;
   doc_number: string;
   doc_type: string;
   category: 'purchase' | 'sale' | 'transfer';
@@ -149,6 +151,12 @@ const validateRut = (rut: string) => {
   
   const expectedDv = calculateExpectedDv(body);
   return { isValid: expectedDv === dv, expectedDv };
+};
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '';
+  const [year, month, day] = dateStr.split('-');
+  return `${day}-${month}-${year}`;
 };
 
 // --- Components ---
@@ -258,6 +266,8 @@ export default function App() {
   const [kardexProduct, setKardexProduct] = useState<string | null>(null);
   const [kardexProductName, setKardexProductName] = useState<string>('');
   const [kardexData, setKardexData] = useState<any[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ show: boolean, id: number | null }>({ show: false, id: null });
+  const [supervisorAuth, setSupervisorAuth] = useState<{ show: boolean, password: '', onAuthorized: () => void }>({ show: false, password: '', onAuthorized: () => {} });
 
   const [isEditingEntity, setIsEditingEntity] = useState(false);
   const [newWarehouseName, setNewWarehouseName] = useState('');
@@ -274,6 +284,7 @@ export default function App() {
   });
   const [newProduct, setNewProduct] = useState<Product>({ id: '', name: '', description: '', unit_price: 0, category_id: undefined, subcategory_id: undefined, image_url: '', is_active: 1 });
   const [newDoc, setNewDoc] = useState<Partial<Document>>({
+    internal_number: '',
     doc_number: '',
     doc_type: 'factura',
     category: 'sale',
@@ -641,20 +652,36 @@ export default function App() {
 
   const fetchKardex = async (productId: string) => {
     const product = products.find(p => p.id === productId);
-    const res = await fetch(`/api/reports/kardex/${productId}`);
-    const data = await res.json();
-    setKardexData(data);
-    setKardexProduct(productId);
-    setKardexProductName(product?.name || '');
-    setShowModal('kardex');
+    try {
+      const res = await fetch(`/api/reports/kardex/${productId}`);
+      const data = await res.json();
+      if (res.ok) {
+        setKardexData(Array.isArray(data) ? data : []);
+        setKardexProduct(productId);
+        setKardexProductName(product?.name || '');
+        setShowModal('kardex');
+      } else {
+        setValidationError({ show: true, msg: data.error || 'Error al cargar el Kardex' });
+      }
+    } catch (error) {
+      setValidationError({ show: true, msg: 'Error de conexión al cargar el Kardex' });
+    }
   };
 
   const fetchStockBreakdown = async (product: any) => {
     setSelectedStockProduct(product);
-    const res = await fetch(`/api/reports/stock-breakdown/${product.product_id}`);
-    const data = await res.json();
-    setStockBreakdown(data);
-    setShowModal('stock_breakdown');
+    try {
+      const res = await fetch(`/api/reports/stock-breakdown/${product.product_id}`);
+      const data = await res.json();
+      if (res.ok) {
+        setStockBreakdown(Array.isArray(data) ? data : []);
+        setShowModal('stock_breakdown');
+      } else {
+        setValidationError({ show: true, msg: data.error || 'Error al cargar el desglose de stock' });
+      }
+    } catch (error) {
+      setValidationError({ show: true, msg: 'Error de conexión al cargar el desglose de stock' });
+    }
   };
 
   const fetchDocDetails = async (docId: number) => {
@@ -737,13 +764,18 @@ export default function App() {
     const res = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(docToSave)
+      body: JSON.stringify({
+        ...docToSave,
+        supervisorAuthorized: supervisorAuth.password === '1234' // Simple supervisor password for demo
+      })
     });
 
     if (res.ok) {
       setShowModal(null);
+      setSupervisorAuth({ show: false, password: '', onAuthorized: () => {} });
       fetchData();
       setNewDoc({
+        internal_number: '',
         doc_number: '',
         doc_type: 'factura',
         category: newDoc.category,
@@ -757,7 +789,26 @@ export default function App() {
       });
     } else {
       const err = await res.json();
-      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo guardar el documento'}` });
+      if (err.error?.includes('Stock insuficiente') && !supervisorAuth.show) {
+        setSupervisorAuth({
+          show: true,
+          password: '',
+          onAuthorized: () => handleSaveDoc()
+        });
+      } else {
+        setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo guardar el documento'}` });
+      }
+    }
+  };
+
+  const handleDeleteDoc = async (id: number) => {
+    const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      fetchData();
+      setShowDeleteConfirm({ show: false, id: null });
+    } else {
+      const err = await res.json();
+      setValidationError({ show: true, msg: `Error: ${err.error || 'No se pudo eliminar el documento'}` });
     }
   };
 
@@ -1174,9 +1225,9 @@ export default function App() {
           <div className="flex space-x-3">
             <Button icon={Search} variant="secondary">Buscar</Button>
             <Button icon={Plus} onClick={async () => {
-              const res = await fetch('/api/documents/next-number');
+              const res = await fetch(`/api/documents/next-number?category=${category}`);
               const { next } = await res.json();
-              setNewDoc(prev => ({ ...prev, category, doc_number: next }));
+              setNewDoc(prev => ({ ...prev, category, internal_number: next, doc_number: '' }));
               setShowModal('document');
             }}>Nuevo Documento</Button>
           </div>
@@ -1188,7 +1239,8 @@ export default function App() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-6 py-4 text-sm font-semibold text-slate-700">Fecha</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-700">Número</th>
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-700">Interno</th>
+                  <th className="px-6 py-4 text-sm font-semibold text-slate-700">NumDoc</th>
                   <th className="px-6 py-4 text-sm font-semibold text-slate-700">Tipo</th>
                   <th className="px-6 py-4 text-sm font-semibold text-slate-700">{entityLabel}</th>
                   <th className="px-6 py-4 text-sm font-semibold text-slate-700 text-right">Total</th>
@@ -1199,8 +1251,9 @@ export default function App() {
               <tbody className="divide-y divide-slate-100">
                 {documents.map((doc, i) => (
                   <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-500">{doc.date}</td>
-                    <td className="px-6 py-4 text-sm font-mono font-bold text-indigo-600">{doc.doc_number}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">{formatDate(doc.date)}</td>
+                    <td className="px-6 py-4 text-sm font-mono font-bold text-indigo-600">{doc.internal_number}</td>
+                    <td className="px-6 py-4 text-sm font-mono text-slate-600">{doc.doc_number}</td>
                     <td className="px-6 py-4 text-sm text-slate-600 capitalize">{doc.doc_type.replace('_', ' ')}</td>
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">{doc.entity_name}</td>
                     <td className="px-6 py-4 text-sm font-bold text-slate-900 text-right">${doc.total_amount.toLocaleString()}</td>
@@ -1214,6 +1267,12 @@ export default function App() {
                     <td className="px-6 py-4 text-sm text-right space-x-2">
                       <button onClick={() => fetchDocDetails(doc.id!)} className="text-slate-400 hover:text-indigo-600"><FileText size={18} /></button>
                       <button onClick={handlePrint} className="text-slate-400 hover:text-indigo-600"><Printer size={18} /></button>
+                      <button 
+                        onClick={() => setShowDeleteConfirm({ show: true, id: doc.id! })} 
+                        className="text-slate-400 hover:text-rose-600"
+                      >
+                        <Trash2 size={18} />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1368,7 +1427,7 @@ export default function App() {
               <tbody className="divide-y divide-slate-100">
                 {accounts.map((acc, i) => (
                   <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-500">{acc.date}</td>
+                    <td className="px-6 py-4 text-sm text-slate-500">{formatDate(acc.date)}</td>
                     <td className="px-6 py-4 text-sm font-mono text-indigo-600">{acc.doc_number}</td>
                     <td className="px-6 py-4 text-sm font-medium text-slate-900">{acc.entity_name}</td>
                     <td className="px-6 py-4 text-sm font-bold text-slate-900 text-right">${acc.total_amount.toLocaleString()}</td>
@@ -1569,7 +1628,8 @@ export default function App() {
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Fecha</th>
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Bodega</th>
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Tipo</th>
-                              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Número</th>
+                              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Interno</th>
+                              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">NumDoc</th>
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Socio</th>
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Mov.</th>
                               <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Saldo</th>
@@ -1579,14 +1639,15 @@ export default function App() {
                           <tbody className="divide-y divide-slate-100">
                             {(() => {
                               let balance = 0;
-                              return kardexData.map((k, i) => {
+                              return (kardexData || []).map((k, i) => {
                                 balance += k.movement;
                                 return (
                                   <tr key={i} className="hover:bg-slate-50">
-                                    <td className="px-4 py-3 text-sm">{k.date}</td>
+                                    <td className="px-4 py-3 text-sm">{formatDate(k.date)}</td>
                                     <td className="px-4 py-3 text-sm">{k.warehouse_name}</td>
                                     <td className="px-4 py-3 text-sm capitalize">{k.doc_type.replace('_', ' ')}</td>
-                                    <td className="px-4 py-3 text-sm font-mono text-indigo-600">{k.doc_number}</td>
+                                    <td className="px-4 py-3 text-sm font-mono font-bold text-indigo-600">{k.internal_number}</td>
+                                    <td className="px-4 py-3 text-sm font-mono text-slate-600">{k.doc_number}</td>
                                     <td className="px-4 py-3 text-sm">{k.entity_name || '-'}</td>
                                     <td className={`px-4 py-3 text-sm font-bold text-right ${k.movement > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                       {k.movement > 0 ? '+' : ''}{k.movement}
@@ -1813,7 +1874,13 @@ export default function App() {
                 <div className="space-y-8">
                   {/* Header */}
                   <div className="grid grid-cols-3 gap-6 bg-slate-50 p-6 rounded-xl border border-slate-200">
-                    <Input label="Número Documento" value={newDoc.doc_number} onChange={(e:any) => setNewDoc({...newDoc, doc_number: e.target.value})} required />
+                    <div className="flex flex-col space-y-1.5">
+                      <label className="text-sm font-semibold text-slate-700">Interno</label>
+                      <div className="px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-slate-500 font-mono">
+                        {newDoc.internal_number || '---'}
+                      </div>
+                    </div>
+                    <Input label="NumDoc" type="number" value={newDoc.doc_number} onChange={(e:any) => setNewDoc({...newDoc, doc_number: e.target.value})} required />
                     <Input label="Fecha" type="date" value={newDoc.date} onChange={(e:any) => setNewDoc({...newDoc, date: e.target.value})} required />
                     <Select label="Tipo Documento" value={newDoc.doc_type} onChange={(e:any) => setNewDoc({...newDoc, doc_type: e.target.value})} options={[
                       { value: 'factura', label: 'Factura' },
@@ -1992,7 +2059,7 @@ export default function App() {
                       variant="secondary" 
                       onClick={() => {
                         let balance = 0;
-                        const data = kardexData.map(k => {
+                        const data = (kardexData || []).map(k => {
                           balance += k.movement;
                           const [y, m, d] = k.date.split('-');
                           return {
@@ -2022,7 +2089,7 @@ export default function App() {
                         doc.text(`Kardex de Producto: ${kardexProduct} - ${kardexProductName}`, 14, 15);
                         
                         let balance = 0;
-                          const body = kardexData.map(k => {
+                          const body = (kardexData || []).map(k => {
                             balance += k.movement;
                             const [y, m, d] = k.date.split('-');
                             return [
@@ -2067,7 +2134,7 @@ export default function App() {
                       <tbody className="divide-y divide-slate-100">
                         {(() => {
                           let balance = 0;
-                          return kardexData.map((k, i) => {
+                          return (kardexData || []).map((k, i) => {
                             balance += k.movement;
                             const [y, m, d] = k.date.split('-');
                             const formattedDate = `${d}-${m}-${y}`;
@@ -2123,7 +2190,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {stockBreakdown.map((b, i) => (
+                        {(stockBreakdown || []).map((b, i) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
                             <td className="px-6 py-4 text-sm font-medium text-slate-900">{b.warehouse_name}</td>
                             <td className="px-6 py-4 text-sm text-right text-emerald-600">{b.incomes}</td>
@@ -2165,8 +2232,10 @@ export default function App() {
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-bold text-slate-400 uppercase">Fecha</p>
-                      <p className="text-lg font-bold text-slate-900">{selectedDoc.date}</p>
-                      <p className="text-sm text-slate-500 capitalize">{selectedDoc.doc_type.replace('_', ' ')} #{selectedDoc.doc_number}</p>
+                      <p className="text-lg font-bold text-slate-900">{formatDate(selectedDoc.date)}</p>
+                      <p className="text-sm text-slate-500 capitalize">{selectedDoc.doc_type.replace('_', ' ')}</p>
+                      <p className="text-sm font-mono text-indigo-600">Interno: {selectedDoc.internal_number}</p>
+                      <p className="text-sm font-mono text-slate-600">NumDoc: {selectedDoc.doc_number}</p>
                     </div>
                   </div>
 
@@ -2521,7 +2590,8 @@ export default function App() {
                       <thead className="bg-slate-50 border-b border-slate-200">
                         <tr>
                           <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Fecha</th>
-                          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Número</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Interno</th>
+                          <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">NumDoc</th>
                           <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Tipo</th>
                           <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase text-right">Total</th>
                           <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase">Estado</th>
@@ -2536,7 +2606,8 @@ export default function App() {
                           
                           return (
                             <tr key={doc.id}>
-                              <td className="px-4 py-3 text-sm">{doc.date}</td>
+                              <td className="px-4 py-3 text-sm">{formatDate(doc.date)}</td>
+                              <td className="px-4 py-3 text-sm font-mono font-bold text-indigo-600">{doc.internal_number}</td>
                               <td className="px-4 py-3 text-sm font-mono">{doc.doc_number}</td>
                               <td className="px-4 py-3 text-sm uppercase">{doc.doc_type}</td>
                               <td className="px-4 py-3 text-sm font-bold text-right">${doc.total_amount.toLocaleString()}</td>
@@ -2627,6 +2698,74 @@ export default function App() {
             <button className="absolute top-8 right-8 text-white/50 hover:text-white transition-colors">
               <X size={40} />
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Supervisor Authorization Modal */}
+      <AnimatePresence>
+        {supervisorAuth.show && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200"
+            >
+              <div className="flex items-center space-x-3 text-amber-600 mb-4">
+                <ShieldAlert size={24} />
+                <h3 className="text-lg font-bold">Autorización de Supervisor</h3>
+              </div>
+              <p className="text-slate-600 mb-6">
+                El stock es insuficiente. Se requiere autorización de un supervisor para continuar con la venta.
+              </p>
+              <Input 
+                label="Clave de Supervisor" 
+                type="password" 
+                value={supervisorAuth.password} 
+                onChange={(e:any) => setSupervisorAuth({...supervisorAuth, password: e.target.value})} 
+                placeholder="Ingrese clave"
+              />
+              <div className="flex justify-end space-x-3 mt-6">
+                <Button variant="secondary" onClick={() => setSupervisorAuth({ ...supervisorAuth, show: false })}>Cancelar</Button>
+                <Button onClick={supervisorAuth.onAuthorized}>Autorizar</Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {showDeleteConfirm.show && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[120] bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200"
+            >
+              <div className="flex items-center space-x-3 text-rose-600 mb-4">
+                <Trash2 size={24} />
+                <h3 className="text-lg font-bold">Confirmar Eliminación</h3>
+              </div>
+              <p className="text-slate-600 mb-6">
+                ¿Realmente quieres eliminar el documento? Esta acción no se puede deshacer y revertirá los movimientos de stock.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <Button variant="secondary" onClick={() => setShowDeleteConfirm({ show: false, id: null })}>NO</Button>
+                <Button variant="danger" onClick={() => showDeleteConfirm.id && handleDeleteDoc(showDeleteConfirm.id)}>SÍ, Eliminar</Button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

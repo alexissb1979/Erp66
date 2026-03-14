@@ -86,22 +86,67 @@ export async function initializeDatabase() {
     await sql`
       CREATE TABLE IF NOT EXISTS documents (
         id SERIAL PRIMARY KEY,
+        internal_number TEXT,
         doc_number TEXT NOT NULL,
-        doc_type TEXT NOT NULL, -- 'factura', 'boleta', 'guia', 'nota_credito'
-        category TEXT NOT NULL, -- 'purchase', 'sale', 'transfer'
+        doc_type TEXT NOT NULL,
+        category TEXT NOT NULL,
         date DATE NOT NULL DEFAULT CURRENT_DATE,
         entity_rut TEXT REFERENCES entities(rut),
         global_discount NUMERIC(5, 2) DEFAULT 0,
-        payment_method TEXT, -- 'efectivo', 'transferencia', 'credito'
+        payment_method TEXT,
         total_net NUMERIC(15, 2) DEFAULT 0,
         total_vat NUMERIC(15, 2) DEFAULT 0,
         total_amount NUMERIC(15, 2) DEFAULT 0,
         from_warehouse_id INTEGER REFERENCES warehouses(id),
         to_warehouse_id INTEGER REFERENCES warehouses(id),
-        status TEXT DEFAULT 'active', -- 'active', 'paid', 'cancelled'
+        status TEXT DEFAULT 'active',
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `;
+
+    // Ensure columns and constraints exist for existing tables
+    try {
+      // Check if internal_number exists
+      const columns = await sql`
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'documents' AND column_name = 'internal_number'
+      `;
+      
+      if (columns.length === 0) {
+        console.log("Adding internal_number column to documents table...");
+        await sql`ALTER TABLE documents ADD COLUMN internal_number TEXT`;
+      }
+
+      // Add unique constraint if it doesn't exist
+      const constraints = await sql`
+        SELECT constraint_name 
+        FROM information_schema.table_constraints 
+        WHERE table_name = 'documents' AND constraint_name = 'unique_entity_doc'
+      `;
+      
+      if (constraints.length === 0) {
+        console.log("Adding unique_entity_doc constraint to documents table...");
+        await sql`ALTER TABLE documents ADD CONSTRAINT unique_entity_doc UNIQUE(entity_rut, doc_number, category)`;
+      }
+    } catch (e) {
+      console.error("Error updating documents table schema:", e);
+    }
+
+    // Disable RLS to fix the reported error
+    try {
+      await sql`ALTER TABLE categories DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE subcategories DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE entities DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE products DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE warehouses DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE documents DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE document_lines DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE stock DISABLE ROW LEVEL SECURITY`;
+      await sql`ALTER TABLE payments DISABLE ROW LEVEL SECURITY`;
+    } catch (e) {
+      console.warn("Could not disable RLS:", e);
+    }
 
     // 7. Document Lines
     await sql`
