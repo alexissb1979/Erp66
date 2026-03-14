@@ -1,1 +1,4 @@
-
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/garagecl/repositories/Erp/
+    - /bin/cp -R * $DEPLOYPATH
