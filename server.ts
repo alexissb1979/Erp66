@@ -13,29 +13,57 @@ const __dirname = path.dirname(__filename);
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || '';
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  console.error("ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env");
+let supabase: any = null;
+
+function getSupabase() {
+  if (supabase) return supabase;
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    console.error("CRITICAL ERROR: SUPABASE_URL and SUPABASE_ANON_KEY must be set in the Secrets panel.");
+    // We don't throw here to allow the server to at least respond with 500s instead of 503ing
+    return null;
+  }
+  
+  try {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+    return supabase;
+  } catch (e) {
+    console.error("Failed to initialize Supabase client:", e);
+    return null;
+  }
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 async function startServer() {
+  console.log("Starting server initialization...");
   const app = express();
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   const PORT = 3000;
 
+  // Middleware to ensure Supabase is configured for API routes
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/') && req.path !== '/api/health' && req.path !== '/api/ping') {
+      if (!getSupabase()) {
+        return res.status(500).json({ 
+          error: "Supabase not configured. Please set SUPABASE_URL and SUPABASE_ANON_KEY in the Secrets panel." 
+        });
+      }
+    }
+    next();
+  });
+
   // Health check
   app.get("/api/health", async (req, res) => {
     try {
-      if (!supabaseUrl || !supabaseAnonKey) {
+      const client = getSupabase();
+      if (!client) {
         return res.status(500).json({ 
           status: "error", 
           message: "Supabase environment variables are missing. Please set SUPABASE_URL and SUPABASE_ANON_KEY in the Secrets panel." 
         });
       }
-      const { error } = await supabase.from('warehouses').select('id').limit(1);
+      const { error } = await client.from('warehouses').select('id').limit(1);
       if (error) throw error;
       res.json({ status: "ok", database: "connected" });
     } catch (e: any) {
@@ -43,25 +71,30 @@ async function startServer() {
     }
   });
 
+  // Simple ping for basic connectivity
+  app.get("/api/ping", (req, res) => {
+    res.json({ status: "pong", timestamp: new Date().toISOString() });
+  });
+
   // API Routes
   
   // Master: Warehouses
   app.get("/api/warehouses", async (req, res) => {
-    const { data, error } = await supabase.from('warehouses').select('*');
+    const { data, error } = await getSupabase().from('warehouses').select('*');
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   });
 
   app.post("/api/warehouses", async (req, res) => {
     const { name } = req.body;
-    const { data, error } = await supabase.from('warehouses').insert([{ name }]).select();
+    const { data, error } = await getSupabase().from('warehouses').insert([{ name }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
   app.put("/api/warehouses/:id", async (req, res) => {
     const { name } = req.body;
-    const { error } = await supabase.from('warehouses').update({ name }).eq('id', req.params.id);
+    const { error } = await getSupabase().from('warehouses').update({ name }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
@@ -69,7 +102,7 @@ async function startServer() {
   app.delete("/api/warehouses/:id", async (req, res) => {
     try {
       // Check if warehouse has stock or movements
-      const { data: stockData, error: stockError } = await supabase
+      const { data: stockData, error: stockError } = await getSupabase()
         .from('stock')
         .select('quantity')
         .eq('warehouse_id', req.params.id)
@@ -80,7 +113,7 @@ async function startServer() {
         return res.status(400).json({ error: "No se puede eliminar una bodega con stock actual." });
       }
       
-      const { error: deleteError } = await supabase.from('warehouses').delete().eq('id', req.params.id);
+      const { error: deleteError } = await getSupabase().from('warehouses').delete().eq('id', req.params.id);
       if (deleteError) throw deleteError;
       
       res.json({ success: true });
@@ -91,7 +124,7 @@ async function startServer() {
 
   // Master: Products
   app.get("/api/products", async (req, res) => {
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from('products')
       .select(`
         *,
@@ -114,17 +147,17 @@ async function startServer() {
   app.post("/api/products", async (req, res) => {
     const { id, name, description, unit_price, category_id, subcategory_id, image_url, is_active } = req.body;
     try {
-      const { data: existing, error: fetchError } = await supabase.from('products').select('id').eq('id', id).single();
+      const { data: existing, error: fetchError } = await getSupabase().from('products').select('id').eq('id', id).single();
       
       if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
       
       if (existing) {
-        const { error } = await supabase.from('products').update({
+        const { error } = await getSupabase().from('products').update({
           name, description, unit_price, category_id, subcategory_id, image_url, is_active: is_active ?? true
         }).eq('id', id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('products').insert([{
+        const { error } = await getSupabase().from('products').insert([{
           id, name, description, unit_price, category_id, subcategory_id, image_url, is_active: is_active ?? true
         }]);
         if (error) throw error;
@@ -138,7 +171,7 @@ async function startServer() {
   app.delete("/api/products/:id", async (req, res) => {
     const { id } = req.params;
     try {
-      const { count, error: countError } = await supabase
+      const { count, error: countError } = await getSupabase()
         .from('document_lines')
         .select('*', { count: 'exact', head: true })
         .eq('product_id', id);
@@ -146,12 +179,12 @@ async function startServer() {
       if (countError) throw countError;
       
       if (count && count > 0) {
-        const { error } = await supabase.from('products').update({ is_active: false }).eq('id', id);
+        const { error } = await getSupabase().from('products').update({ is_active: false }).eq('id', id);
         if (error) throw error;
         return res.json({ message: "Product has movements and was disabled instead of deleted." });
       }
       
-      const { error } = await supabase.from('products').delete().eq('id', id);
+      const { error } = await getSupabase().from('products').delete().eq('id', id);
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
@@ -161,34 +194,34 @@ async function startServer() {
 
   // Master: Categories & Subcategories
   app.get("/api/categories", async (req, res) => {
-    const { data, error } = await supabase.from('categories').select('*');
+    const { data, error } = await getSupabase().from('categories').select('*');
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   });
 
   app.post("/api/categories", async (req, res) => {
     const { name, is_active } = req.body;
-    const { data, error } = await supabase.from('categories').insert([{ name, is_active: is_active ?? true }]).select();
+    const { data, error } = await getSupabase().from('categories').insert([{ name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
   app.put("/api/categories/:id", async (req, res) => {
     const { name, is_active } = req.body;
-    const { error } = await supabase.from('categories').update({ name, is_active }).eq('id', req.params.id);
+    const { error } = await getSupabase().from('categories').update({ name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
   app.delete("/api/categories/:id", async (req, res) => {
-    const { error } = await supabase.from('categories').delete().eq('id', req.params.id);
+    const { error } = await getSupabase().from('categories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
   app.get("/api/subcategories", async (req, res) => {
     const { category_id } = req.query;
-    let query = supabase.from('subcategories').select('*');
+    let query = getSupabase().from('subcategories').select('*');
     if (category_id) {
       query = query.eq('category_id', category_id);
     }
@@ -199,20 +232,20 @@ async function startServer() {
 
   app.post("/api/subcategories", async (req, res) => {
     const { category_id, name, is_active } = req.body;
-    const { data, error } = await supabase.from('subcategories').insert([{ category_id, name, is_active: is_active ?? true }]).select();
+    const { data, error } = await getSupabase().from('subcategories').insert([{ category_id, name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
   app.put("/api/subcategories/:id", async (req, res) => {
     const { category_id, name, is_active } = req.body;
-    const { error } = await supabase.from('subcategories').update({ category_id, name, is_active }).eq('id', req.params.id);
+    const { error } = await getSupabase().from('subcategories').update({ category_id, name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
   app.delete("/api/subcategories/:id", async (req, res) => {
-    const { error } = await supabase.from('subcategories').delete().eq('id', req.params.id);
+    const { error } = await getSupabase().from('subcategories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
@@ -220,7 +253,7 @@ async function startServer() {
   // Master: Socios de Negocios (Entities)
   app.get("/api/entities", async (req, res) => {
     const { type } = req.query;
-    let query = supabase.from('entities').select('*');
+    let query = getSupabase().from('entities').select('*');
     if (type) {
       query = query.or(`type.eq.${type},type.eq.both`);
     }
@@ -236,19 +269,19 @@ async function startServer() {
       person_type, contact_name, contact_phone, contact_email
     } = req.body;
     try {
-      const { data: existing, error: fetchError } = await supabase.from('entities').select('rut').eq('rut', rut).single();
+      const { data: existing, error: fetchError } = await getSupabase().from('entities').select('rut').eq('rut', rut).single();
       
       if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
       if (existing) {
-        const { error } = await supabase.from('entities').update({
+        const { error } = await getSupabase().from('entities').update({
           name, type, address, phone, email,
           comuna, ciudad, is_partner, default_discount,
           person_type, contact_name, contact_phone, contact_email
         }).eq('rut', rut);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('entities').insert([{
+        const { error } = await getSupabase().from('entities').insert([{
           rut, name, type, address, phone, email,
           comuna, ciudad, is_partner, default_discount,
           person_type, contact_name, contact_phone, contact_email
@@ -264,7 +297,7 @@ async function startServer() {
   app.get("/api/entities/:rut/transactions", async (req, res) => {
     const { rut } = req.params;
     try {
-      const { data: docs, error: docError } = await supabase
+      const { data: docs, error: docError } = await getSupabase()
         .from('documents')
         .select(`
           *,
@@ -290,7 +323,7 @@ async function startServer() {
   app.get("/api/documents", async (req, res) => {
     const { category, q, type } = req.query;
     try {
-      let query = supabase.from('documents').select(`
+      let query = getSupabase().from('documents').select(`
         *,
         entity:entities(name)
       `);
@@ -317,7 +350,7 @@ async function startServer() {
 
   app.get("/api/documents/next-number", async (req, res) => {
     const { category } = req.query;
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
       .from('documents')
       .select('internal_number')
       .eq('category', category)
@@ -335,7 +368,7 @@ async function startServer() {
 
   app.get("/api/documents/:id", async (req, res) => {
     try {
-      const { data: doc, error: docError } = await supabase
+      const { data: doc, error: docError } = await getSupabase()
         .from('documents')
         .select(`
           *,
@@ -347,7 +380,7 @@ async function startServer() {
       if (docError) throw docError;
       if (!doc) return res.status(404).json({ error: "Document not found" });
 
-      const { data: lines, error: lineError } = await supabase
+      const { data: lines, error: lineError } = await getSupabase()
         .from('document_lines')
         .select(`
           *,
@@ -371,7 +404,7 @@ async function startServer() {
   });
 
   const updateStock = async (prodId: string, whId: number, qty: number, loc: string = 'General') => {
-    const { data: existing, error: fetchError } = await supabase
+    const { data: existing, error: fetchError } = await getSupabase()
       .from('stock')
       .select('*')
       .eq('product_id', prodId)
@@ -382,7 +415,7 @@ async function startServer() {
     if (fetchError && fetchError.code !== 'PGRST116') throw fetchError;
 
     if (existing) {
-      const { error: updateError } = await supabase
+      const { error: updateError } = await getSupabase()
         .from('stock')
         .update({ quantity: existing.quantity + qty })
         .eq('product_id', prodId)
@@ -390,7 +423,7 @@ async function startServer() {
         .eq('location', loc);
       if (updateError) throw updateError;
     } else {
-      const { error: insertError } = await supabase
+      const { error: insertError } = await getSupabase()
         .from('stock')
         .insert([{ product_id: prodId, warehouse_id: whId, location: loc, quantity: qty }]);
       if (insertError) throw insertError;
@@ -407,9 +440,9 @@ async function startServer() {
 
     try {
       // 1. Get old document and lines
-      const { data: oldDoc, error: oldDocError } = await supabase.from('documents').select('*').eq('id', id).single();
+      const { data: oldDoc, error: oldDocError } = await getSupabase().from('documents').select('*').eq('id', id).single();
       if (oldDocError) throw oldDocError;
-      const { data: oldLines, error: oldLinesError } = await supabase.from('document_lines').select('*').eq('document_id', id);
+      const { data: oldLines, error: oldLinesError } = await getSupabase().from('document_lines').select('*').eq('document_id', id);
       if (oldLinesError) throw oldLinesError;
 
       // 2. Reverse old stock changes
@@ -439,7 +472,7 @@ async function startServer() {
       const newStatus = status || ((payment_method === 'credito') ? 'active' : 'paid');
 
       // 4. Update document header
-      const { error: updateDocError } = await supabase.from('documents').update({
+      const { error: updateDocError } = await getSupabase().from('documents').update({
         doc_number, doc_type, category, date, entity_rut, 
         global_discount, payment_method, total_net: discounted_net, total_vat, total_amount,
         from_warehouse_id, to_warehouse_id, status: newStatus
@@ -447,12 +480,12 @@ async function startServer() {
       if (updateDocError) throw updateDocError;
 
       // 5. Delete old lines
-      const { error: deleteLinesError } = await supabase.from('document_lines').delete().eq('document_id', id);
+      const { error: deleteLinesError } = await getSupabase().from('document_lines').delete().eq('document_id', id);
       if (deleteLinesError) throw deleteLinesError;
 
       // 6. Insert new lines and apply new stock changes
       for (const line of lines) {
-        const { error: insertLineError } = await supabase.from('document_lines').insert([{
+        const { error: insertLineError } = await getSupabase().from('document_lines').insert([{
           document_id: id, product_id: line.product_id, warehouse_id: line.warehouse_id, 
           quantity: line.quantity, price: line.price, discount: line.discount, total: line.total
         }]);
@@ -483,7 +516,7 @@ async function startServer() {
       const { id } = req.params;
       
       // Get document details to revert stock
-      const { data: doc, error: docError } = await supabase
+      const { data: doc, error: docError } = await getSupabase()
         .from('documents')
         .select('*, lines:document_lines(*)')
         .eq('id', id)
@@ -507,7 +540,7 @@ async function startServer() {
         }
       }
 
-      const { error: deleteError } = await supabase.from('documents').delete().eq('id', id);
+      const { error: deleteError } = await getSupabase().from('documents').delete().eq('id', id);
       if (deleteError) throw deleteError;
 
       res.json({ success: true });
@@ -525,7 +558,7 @@ async function startServer() {
 
     try {
       // Check for duplicates
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabase()
         .from('documents')
         .select('id')
         .eq('entity_rut', entity_rut)
@@ -548,7 +581,7 @@ async function startServer() {
 
       const status = (payment_method === 'credito') ? 'active' : 'paid';
 
-      const { data: docData, error: docError } = await supabase.from('documents').insert([{
+      const { data: docData, error: docError } = await getSupabase().from('documents').insert([{
         internal_number, doc_number, doc_type, category, date, entity_rut, 
         global_discount, payment_method, total_net: discounted_net, total_vat, total_amount,
         from_warehouse_id, to_warehouse_id, status
@@ -560,7 +593,7 @@ async function startServer() {
       for (const line of lines) {
         // Stock check for sales
         if (category === 'sale' && doc_type !== 'nota_credito') {
-          const { data: stockData } = await supabase
+          const { data: stockData } = await getSupabase()
             .from('stock')
             .select('quantity')
             .eq('product_id', line.product_id)
@@ -573,7 +606,7 @@ async function startServer() {
           }
         }
 
-        const { error: lineError } = await supabase.from('document_lines').insert([{
+        const { error: lineError } = await getSupabase().from('document_lines').insert([{
           document_id: docId, product_id: line.product_id, warehouse_id: line.warehouse_id, 
           quantity: line.quantity, price: line.price, discount: line.discount, total: line.total
         }]);
@@ -603,20 +636,20 @@ async function startServer() {
   app.post("/api/payments", async (req, res) => {
     const { document_id, date, amount, method } = req.body;
     try {
-      const { error: payError } = await supabase.from('payments').insert([{ document_id, date, amount, method }]);
+      const { error: payError } = await getSupabase().from('payments').insert([{ document_id, date, amount, method }]);
       if (payError) throw payError;
       
       // Check if document is fully paid
-      const { data: doc, error: docError } = await supabase.from('documents').select('total_amount').eq('id', document_id).single();
+      const { data: doc, error: docError } = await getSupabase().from('documents').select('total_amount').eq('id', document_id).single();
       if (docError) throw docError;
 
-      const { data: payments, error: paymentsError } = await supabase.from('payments').select('amount').eq('document_id', document_id);
+      const { data: payments, error: paymentsError } = await getSupabase().from('payments').select('amount').eq('document_id', document_id);
       if (paymentsError) throw paymentsError;
 
       const totalPaid = payments.reduce((sum, p) => sum + p.amount, 0);
       
       if (totalPaid >= doc.total_amount) {
-        await supabase.from('documents').update({ status: 'paid' }).eq('id', document_id);
+        await getSupabase().from('documents').update({ status: 'paid' }).eq('id', document_id);
       }
 
       res.status(201).json({ success: true });
@@ -630,10 +663,10 @@ async function startServer() {
     try {
       // This is a complex query that might be better as a Supabase View or RPC
       // For now, we'll fetch products and calculate manually or use a simplified approach
-      const { data: products, error: prodError } = await supabase.from('products').select('id, name').eq('is_active', true);
+      const { data: products, error: prodError } = await getSupabase().from('products').select('id, name').eq('is_active', true);
       if (prodError) throw prodError;
 
-      const { data: lines, error: lineError } = await supabase
+      const { data: lines, error: lineError } = await getSupabase()
         .from('document_lines')
         .select(`
           quantity,
@@ -684,10 +717,10 @@ async function startServer() {
   app.get("/api/reports/stock-breakdown/:productId", async (req, res) => {
     const { productId } = req.params;
     try {
-      const { data: warehouses, error: whError } = await supabase.from('warehouses').select('*');
+      const { data: warehouses, error: whError } = await getSupabase().from('warehouses').select('*');
       if (whError) throw whError;
 
-      const { data: lines, error: lineError } = await supabase
+      const { data: lines, error: lineError } = await getSupabase()
         .from('document_lines')
         .select(`
           quantity,
@@ -730,7 +763,7 @@ async function startServer() {
 
   app.get("/api/reports/kardex/:productId", async (req, res) => {
     try {
-      const { data: rows, error } = await supabase
+      const { data: rows, error } = await getSupabase()
         .from('document_lines')
         .select(`
           id,
@@ -819,7 +852,7 @@ async function startServer() {
 
   app.get("/api/reports/accounts", async (req, res) => {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await getSupabase()
         .from('documents')
         .select(`
           *,
@@ -860,9 +893,13 @@ async function startServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server is listening on port ${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV}`);
+    
     // Initialize database in the background after server starts
-    initializeDatabase().catch(dbError => {
+    initializeDatabase().then(() => {
+      console.log("Database initialization finished successfully.");
+    }).catch(dbError => {
       console.error("Database initialization failed:", dbError);
     });
   });
