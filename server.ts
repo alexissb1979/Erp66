@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createClient } from '@supabase/supabase-js';
@@ -21,16 +20,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 async function startServer() {
-  await initializeDatabase();
   const app = express();
-  const PORT = process.env.PORT || 3000;
-  const BASE_PATH = '/erp';
-
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  const PORT = 3000;
+
   // Health check
-  app.get(`${BASE_PATH}/api/health`, async (req, res) => {
+  app.get("/api/health", async (req, res) => {
     try {
       if (!supabaseUrl || !supabaseAnonKey) {
         return res.status(500).json({ 
@@ -49,27 +46,27 @@ async function startServer() {
   // API Routes
   
   // Master: Warehouses
-  app.get(`${BASE_PATH}/api/warehouses`, async (req, res) => {
+  app.get("/api/warehouses", async (req, res) => {
     const { data, error } = await supabase.from('warehouses').select('*');
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   });
 
-  app.post(`${BASE_PATH}/api/warehouses`, async (req, res) => {
+  app.post("/api/warehouses", async (req, res) => {
     const { name } = req.body;
     const { data, error } = await supabase.from('warehouses').insert([{ name }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put(`${BASE_PATH}/api/warehouses/:id`, async (req, res) => {
+  app.put("/api/warehouses/:id", async (req, res) => {
     const { name } = req.body;
     const { error } = await supabase.from('warehouses').update({ name }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete(`${BASE_PATH}/api/warehouses/:id`, async (req, res) => {
+  app.delete("/api/warehouses/:id", async (req, res) => {
     try {
       // Check if warehouse has stock or movements
       const { data: stockData, error: stockError } = await supabase
@@ -93,7 +90,7 @@ async function startServer() {
   });
 
   // Master: Products
-  app.get(`${BASE_PATH}/api/products`, async (req, res) => {
+  app.get("/api/products", async (req, res) => {
     const { data, error } = await supabase
       .from('products')
       .select(`
@@ -114,7 +111,7 @@ async function startServer() {
     res.json(flattened);
   });
 
-  app.post(`${BASE_PATH}/api/products`, async (req, res) => {
+  app.post("/api/products", async (req, res) => {
     const { id, name, description, unit_price, category_id, subcategory_id, image_url, is_active } = req.body;
     try {
       const { data: existing, error: fetchError } = await supabase.from('products').select('id').eq('id', id).single();
@@ -138,7 +135,7 @@ async function startServer() {
     }
   });
 
-  app.delete(`${BASE_PATH}/api/products/:id`, async (req, res) => {
+  app.delete("/api/products/:id", async (req, res) => {
     const { id } = req.params;
     try {
       const { count, error: countError } = await supabase
@@ -163,33 +160,33 @@ async function startServer() {
   });
 
   // Master: Categories & Subcategories
-  app.get(`${BASE_PATH}/api/categories`, async (req, res) => {
+  app.get("/api/categories", async (req, res) => {
     const { data, error } = await supabase.from('categories').select('*');
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   });
 
-  app.post(`${BASE_PATH}/api/categories`, async (req, res) => {
+  app.post("/api/categories", async (req, res) => {
     const { name, is_active } = req.body;
     const { data, error } = await supabase.from('categories').insert([{ name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put(`${BASE_PATH}/api/categories/:id`, async (req, res) => {
+  app.put("/api/categories/:id", async (req, res) => {
     const { name, is_active } = req.body;
     const { error } = await supabase.from('categories').update({ name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete(`${BASE_PATH}/api/categories/:id`, async (req, res) => {
+  app.delete("/api/categories/:id", async (req, res) => {
     const { error } = await supabase.from('categories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.get(`${BASE_PATH}/api/subcategories`, async (req, res) => {
+  app.get("/api/subcategories", async (req, res) => {
     const { category_id } = req.query;
     let query = supabase.from('subcategories').select('*');
     if (category_id) {
@@ -200,28 +197,28 @@ async function startServer() {
     res.json(data);
   });
 
-  app.post(`${BASE_PATH}/api/subcategories`, async (req, res) => {
+  app.post("/api/subcategories", async (req, res) => {
     const { category_id, name, is_active } = req.body;
     const { data, error } = await supabase.from('subcategories').insert([{ category_id, name, is_active: is_active ?? true }]).select();
     if (error) return res.status(400).json({ error: error.message });
     res.status(201).json({ id: data[0].id });
   });
 
-  app.put(`${BASE_PATH}/api/subcategories/:id`, async (req, res) => {
+  app.put("/api/subcategories/:id", async (req, res) => {
     const { category_id, name, is_active } = req.body;
     const { error } = await supabase.from('subcategories').update({ category_id, name, is_active }).eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
-  app.delete(`${BASE_PATH}/api/subcategories/:id`, async (req, res) => {
+  app.delete("/api/subcategories/:id", async (req, res) => {
     const { error } = await supabase.from('subcategories').delete().eq('id', req.params.id);
     if (error) return res.status(400).json({ error: error.message });
     res.json({ success: true });
   });
 
   // Master: Socios de Negocios (Entities)
-  app.get(`${BASE_PATH}/api/entities`, async (req, res) => {
+  app.get("/api/entities", async (req, res) => {
     const { type } = req.query;
     let query = supabase.from('entities').select('*');
     if (type) {
@@ -232,7 +229,7 @@ async function startServer() {
     res.json(data);
   });
 
-  app.post(`${BASE_PATH}/api/entities`, async (req, res) => {
+  app.post("/api/entities", async (req, res) => {
     const { 
       rut, name, type, address, phone, email,
       comuna, ciudad, is_partner, default_discount,
@@ -264,7 +261,7 @@ async function startServer() {
     }
   });
 
-  app.get(`${BASE_PATH}/api/entities/:rut/transactions`, async (req, res) => {
+  app.get("/api/entities/:rut/transactions", async (req, res) => {
     const { rut } = req.params;
     try {
       const { data: docs, error: docError } = await supabase
@@ -290,7 +287,7 @@ async function startServer() {
   });
 
   // Documents
-  app.get(`${BASE_PATH}/api/documents`, async (req, res) => {
+  app.get("/api/documents", async (req, res) => {
     const { category, q, type } = req.query;
     try {
       let query = supabase.from('documents').select(`
@@ -318,7 +315,7 @@ async function startServer() {
     }
   });
 
-  app.get(`${BASE_PATH}/api/documents/next-number`, async (req, res) => {
+  app.get("/api/documents/next-number", async (req, res) => {
     const { category } = req.query;
     const { data, error } = await supabase
       .from('documents')
@@ -336,7 +333,7 @@ async function startServer() {
     res.json({ next: next.toString().padStart(6, '0') });
   });
 
-  app.get(`${BASE_PATH}/api/documents/:id`, async (req, res) => {
+  app.get("/api/documents/:id", async (req, res) => {
     try {
       const { data: doc, error: docError } = await supabase
         .from('documents')
@@ -400,7 +397,7 @@ async function startServer() {
     }
   };
 
-  app.put(`${BASE_PATH}/api/documents/:id`, async (req, res) => {
+  app.put("/api/documents/:id", async (req, res) => {
     const { id } = req.params;
     const { 
       doc_number, doc_type, category, date, entity_rut, 
@@ -481,7 +478,7 @@ async function startServer() {
     }
   });
 
-  app.delete(`${BASE_PATH}/api/documents/:id`, async (req, res) => {
+  app.delete("/api/documents/:id", async (req, res) => {
     try {
       const { id } = req.params;
       
@@ -519,7 +516,7 @@ async function startServer() {
     }
   });
 
-  app.post(`${BASE_PATH}/api/documents`, async (req, res) => {
+  app.post("/api/documents", async (req, res) => {
     const { 
       internal_number, doc_number, doc_type, category, date, entity_rut, 
       global_discount, payment_method, lines,
@@ -603,7 +600,7 @@ async function startServer() {
   });
 
   // Payments
-  app.post(`${BASE_PATH}/api/payments`, async (req, res) => {
+  app.post("/api/payments", async (req, res) => {
     const { document_id, date, amount, method } = req.body;
     try {
       const { error: payError } = await supabase.from('payments').insert([{ document_id, date, amount, method }]);
@@ -629,7 +626,7 @@ async function startServer() {
   });
 
   // Reports
-  app.get(`${BASE_PATH}/api/reports/stock`, async (req, res) => {
+  app.get("/api/reports/stock", async (req, res) => {
     try {
       // This is a complex query that might be better as a Supabase View or RPC
       // For now, we'll fetch products and calculate manually or use a simplified approach
@@ -684,7 +681,7 @@ async function startServer() {
     }
   });
 
-  app.get(`${BASE_PATH}/api/reports/stock-breakdown/:productId`, async (req, res) => {
+  app.get("/api/reports/stock-breakdown/:productId", async (req, res) => {
     const { productId } = req.params;
     try {
       const { data: warehouses, error: whError } = await supabase.from('warehouses').select('*');
@@ -731,7 +728,7 @@ async function startServer() {
     }
   });
 
-  app.get(`${BASE_PATH}/api/reports/kardex/:productId`, async (req, res) => {
+  app.get("/api/reports/kardex/:productId", async (req, res) => {
     try {
       const { data: rows, error } = await supabase
         .from('document_lines')
@@ -820,7 +817,7 @@ async function startServer() {
     }
   });
 
-  app.get(`${BASE_PATH}/api/reports/accounts`, async (req, res) => {
+  app.get("/api/reports/accounts", async (req, res) => {
     try {
       const { data, error } = await supabase
         .from('documents')
@@ -848,26 +845,26 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
-      base: `${BASE_PATH}/`,
       appType: "spa",
     });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(BASE_PATH, express.static(distPath));
-    app.get(`${BASE_PATH}/*`, (req, res) => {
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
-    });
-    // Redirect root to BASE_PATH
-    app.get('/', (req, res) => {
-      res.redirect(`${BASE_PATH}/`);
     });
   }
 
-  app.listen(Number(PORT), "0.0.0.0", () => {
-    console.log(`Server running on http://0.0.0.0:${PORT}${BASE_PATH}`);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+    // Initialize database in the background after server starts
+    initializeDatabase().catch(dbError => {
+      console.error("Database initialization failed:", dbError);
+    });
   });
 }
 
